@@ -73,6 +73,9 @@
     .card {
       background: var(--card); border-radius: 12px; padding: 16px; margin-bottom: 20px;
     }
+    #expensesView > .card:first-child {
+      text-align: center;
+    }
     .total-label { font-size: 13px; color: var(--subtext); text-transform: uppercase; }
     .total-amount { font-size: 36px; font-weight: 700; margin-top: 4px; }
     
@@ -81,6 +84,30 @@
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 10px;
+    }
+    .expense-meta-row {
+      grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
+    }
+    .form-row > * {
+      min-width: 0;
+    }
+    #amount,
+    #date {
+      height: 46px;
+      margin-bottom: 12px;
+    }
+    #date {
+      display: block;
+      appearance: none;
+      -webkit-appearance: none;
+      font-size: 14px;
+      padding: 10px 8px;
+    }
+    @media (max-width: 360px) {
+      .expense-meta-row {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+        gap: 8px;
+      }
     }
     .inline-add {
       display: flex;
@@ -152,11 +179,73 @@
       padding: 10px;
       font-size: 14px;
     }
+    .expense-filter-selects {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .expense-filter-selects select {
+      margin-bottom: 4px;
+      padding: 10px;
+      font-size: 14px;
+    }
+    @media (max-width: 360px) {
+      .expense-filter-selects {
+        gap: 8px;
+      }
+    }
 
     /* Lists (Transactions & Options) */
+    .expense-row {
+      position: relative;
+      overflow: hidden;
+      border-bottom: 0.5px solid rgba(142, 142, 147, 0.3);
+      touch-action: pan-y;
+    }
+    .expense-row:last-child {
+      border-bottom: none;
+    }
     .list-item {
       display: flex; justify-content: space-between; align-items: center;
       padding: 12px 0; border-bottom: 0.5px solid rgba(142, 142, 147, 0.3);
+    }
+    .expense-row > .list-item {
+      position: relative;
+      z-index: 2;
+      background: var(--card);
+      border-bottom: none;
+      transition: transform 180ms ease;
+      touch-action: pan-y;
+    }
+    .expense-row.open > .list-item {
+      transform: translateX(-128px);
+    }
+    .expense-actions {
+      position: absolute;
+      z-index: 1;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      width: 128px;
+      display: flex;
+      gap: 0;
+    }
+    .expense-actions button {
+      flex: 1;
+      border: none;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .expense-actions .edit-btn {
+      background: var(--accent);
+      color: #fff;
+    }
+    .expense-actions .del-btn {
+      background: var(--danger);
+      color: #fff;
     }
     .list-item:last-child { border-bottom: none; }
     .tx-title { font-weight: 600; font-size: 16px; }
@@ -181,7 +270,7 @@
   <!-- EXPENSES VIEW -->
   <div id="expensesView">
     <div class="card">
-      <div class="total-label" id="totalLabel">Total Spent (Current Month)</div>
+      <div class="total-label" id="totalLabel">Total Spent</div>
       <div class="total-amount" id="totalAmount">$0.00</div>
     </div>
 
@@ -190,8 +279,8 @@
       <h2 id="formTitle">Add Expense</h2>
       <form id="expenseForm">
         <input type="text" id="title" placeholder="Title (e.g., Coffee)" required />
-        <div class="form-row">
-          <input type="number" inputmode="decimal" id="amount" placeholder="Amount" step="0.01" min="0.01" required />
+        <div class="form-row expense-meta-row">
+          <input type="text" inputmode="numeric" pattern="[0-9.]*" id="amount" value="00.00" placeholder="Amount" required />
           <input type="date" id="date" required />
         </div>
         <div class="form-row">
@@ -224,6 +313,15 @@
         </div>
       </div>
 
+      <div class="expense-filter-selects">
+        <select id="filterCategory" aria-label="Filter by category">
+          <option value="">All Categories</option>
+        </select>
+        <select id="filterAccount" aria-label="Filter by account">
+          <option value="">All Accounts</option>
+        </select>
+      </div>
+
       <div id="expenseList"></div>
     </div>
   </div>
@@ -251,376 +349,6 @@
     </div>
   </div>
 
-  <script>
-    document.addEventListener('DOMContentLoaded', () => {
-      const EXPENSE_KEY = 'ios_pwa_expenses';
-      const CATEGORY_KEY = 'ios_pwa_categories';
-      const ACCOUNT_KEY = 'ios_pwa_accounts';
-
-      const DEFAULT_CATEGORIES = [
-        '🍔 Food & Dining',
-        '🚗 Transportation',
-        '⚡ Utilities',
-        '🛍️ Shopping',
-        '🏷️ Other'
-      ];
-
-      const DEFAULT_ACCOUNTS = [
-        '💳 Credit Card',
-        '🏦 Debit Card',
-        '💵 Cash',
-        '📱 Apple Pay',
-        '🔄 Bank Transfer'
-      ];
-
-      function safeLoad(key, fallback) {
-        try {
-          const parsed = JSON.parse(localStorage.getItem(key));
-          return Array.isArray(parsed) && parsed.length > 0 ? parsed : fallback;
-        } catch (e) {
-          return fallback;
-        }
-      }
-
-      let expenses = (() => {
-        try {
-          const parsed = JSON.parse(localStorage.getItem(EXPENSE_KEY));
-          return Array.isArray(parsed) ? parsed : [];
-        } catch (e) {
-          return [];
-        }
-      })();
-      let categories = safeLoad(CATEGORY_KEY, [...DEFAULT_CATEGORIES]);
-      let accounts = safeLoad(ACCOUNT_KEY, [...DEFAULT_ACCOUNTS]);
-      let editingId = null;
-      let inSettings = false;
-      let activeFilter = 'month';
-
-      // DOM Elements
-      const listEl = document.getElementById('expenseList');
-      const totalEl = document.getElementById('totalAmount');
-      const totalLabelEl = document.getElementById('totalLabel');
-      const form = document.getElementById('expenseForm');
-      const formTitleEl = document.getElementById('formTitle');
-      const submitBtn = document.getElementById('submitBtn');
-      const cancelEditBtn = document.getElementById('cancelEditBtn');
-      const categorySelect = document.getElementById('category');
-      const accountSelect = document.getElementById('account');
-
-      const filterPills = document.querySelectorAll('.filter-pill');
-      const dateRangeBox = document.getElementById('dateRangeBox');
-      const filterFromInput = document.getElementById('filterFrom');
-      const filterToInput = document.getElementById('filterTo');
-
-      const settingsToggleBtn = document.getElementById('settingsToggleBtn');
-      const expensesView = document.getElementById('expensesView');
-      const settingsView = document.getElementById('settingsView');
-      const pageHeader = document.getElementById('pageHeader');
-
-      const GEAR_ICON_SVG = `
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="3"></circle>
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-        </svg>
-      `;
-
-      function toLocalDateStr(dateObj) {
-        const y = dateObj.getFullYear();
-        const m = String(dateObj.getMonth() + 1).padStart(2, '0');
-        const d = String(dateObj.getDate()).padStart(2, '0');
-        return `${y}-${m}-${d}`;
-      }
-
-      const today = new Date();
-      const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-      document.getElementById('date').value = toLocalDateStr(today);
-      filterFromInput.value = toLocalDateStr(firstOfMonth);
-      filterToInput.value = toLocalDateStr(today);
-
-      // Filter Pills
-      filterPills.forEach(pill => {
-        pill.addEventListener('click', () => {
-          activeFilter = pill.dataset.filter;
-          filterPills.forEach(p => p.classList.toggle('active', p === pill));
-          dateRangeBox.style.display = activeFilter === 'range' ? 'grid' : 'none';
-          renderExpenses();
-        });
-      });
-
-      filterFromInput.addEventListener('change', renderExpenses);
-      filterToInput.addEventListener('change', renderExpenses);
-
-      // Gear / Settings Toggle
-      settingsToggleBtn.addEventListener('click', () => {
-        inSettings = !inSettings;
-        expensesView.style.display = inSettings ? 'none' : 'block';
-        settingsView.style.display = inSettings ? 'block' : 'none';
-        pageHeader.textContent = inSettings ? 'Settings' : 'Expenses';
-
-        if (inSettings) {
-          settingsToggleBtn.className = 'done-btn';
-          settingsToggleBtn.textContent = 'Done';
-          settingsToggleBtn.setAttribute('aria-label', 'Done');
-        } else {
-          settingsToggleBtn.className = 'icon-btn';
-          settingsToggleBtn.innerHTML = GEAR_ICON_SVG;
-          settingsToggleBtn.setAttribute('aria-label', 'Settings');
-        }
-      });
-
-      function escapeHtml(str) {
-        return String(str)
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/"/g, '&quot;');
-      }
-
-      function renderDropdowns() {
-        const currentCat = categorySelect.value;
-        const currentAcc = accountSelect.value;
-
-        categorySelect.innerHTML = categories
-          .map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`)
-          .join('');
-
-        accountSelect.innerHTML = accounts
-          .map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`)
-          .join('');
-
-        if (categories.includes(currentCat)) categorySelect.value = currentCat;
-        if (accounts.includes(currentAcc)) accountSelect.value = currentAcc;
-      }
-
-      function renderSettings() {
-        document.getElementById('categorySettingsList').innerHTML = categories.map((cat, idx) => `
-          <div class="list-item">
-            <span>${escapeHtml(cat)}</span>
-            <div class="item-actions">
-              <button type="button" class="edit-btn" data-action="edit-opt" data-type="category" data-idx="${idx}">Edit</button>
-              <button type="button" class="del-btn" data-action="del-opt" data-type="category" data-idx="${idx}">Delete</button>
-            </div>
-          </div>
-        `).join('');
-
-        document.getElementById('accountSettingsList').innerHTML = accounts.map((acc, idx) => `
-          <div class="list-item">
-            <span>${escapeHtml(acc)}</span>
-            <div class="item-actions">
-              <button type="button" class="edit-btn" data-action="edit-opt" data-type="account" data-idx="${idx}">Edit</button>
-              <button type="button" class="del-btn" data-action="del-opt" data-type="account" data-idx="${idx}">Delete</button>
-            </div>
-          </div>
-        `).join('');
-      }
-
-      function saveOptions() {
-        localStorage.setItem(CATEGORY_KEY, JSON.stringify(categories));
-        localStorage.setItem(ACCOUNT_KEY, JSON.stringify(accounts));
-        renderDropdowns();
-        renderSettings();
-      }
-
-      // Event Delegation for Settings Edit/Delete
-      settingsView.addEventListener('click', (e) => {
-        const btn = e.target.closest('button[data-action]');
-        if (!btn) return;
-        const { action, type, idx } = btn.dataset;
-        const index = Number(idx);
-        const list = type === 'category' ? categories : accounts;
-
-        if (action === 'edit-opt') {
-          const oldVal = list[index];
-          const updated = prompt(`Edit ${type}:`, oldVal);
-          if (updated !== null && updated.trim() !== '' && updated.trim() !== oldVal) {
-            const newVal = updated.trim();
-            list[index] = newVal;
-            expenses = expenses.map(exp => {
-              if (type === 'category' && exp.category === oldVal) return { ...exp, category: newVal };
-              if (type === 'account' && exp.account === oldVal) return { ...exp, account: newVal };
-              return exp;
-            });
-            saveOptions();
-            saveExpenses();
-          }
-        } else if (action === 'del-opt') {
-          if (list.length <= 1) {
-            alert(`You must keep at least one ${type}.`);
-            return;
-          }
-          const value = list[index];
-          if (!confirm(`Delete ${type} "${value}"?`)) return;
-          list.splice(index, 1);
-          saveOptions();
-        }
-      });
-
-      document.getElementById('addCategoryForm').addEventListener('submit', (e) => {
-        e.preventDefault();
-        const input = document.getElementById('newCategoryInput');
-        const val = input.value.trim();
-        if (val && !categories.includes(val)) {
-          categories.push(val);
-          saveOptions();
-        }
-        input.value = '';
-      });
-
-      document.getElementById('addAccountForm').addEventListener('submit', (e) => {
-        e.preventDefault();
-        const input = document.getElementById('newAccountInput');
-        const val = input.value.trim();
-        if (val && !accounts.includes(val)) {
-          accounts.push(val);
-          saveOptions();
-        }
-        input.value = '';
-      });
-
-      function getFilteredExpenses() {
-        const now = new Date();
-        const currentYearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-
-        if (activeFilter === 'month') {
-          totalLabelEl.textContent = 'Total Spent (Current Month)';
-          return expenses.filter(exp => exp.date && exp.date.startsWith(currentYearMonth));
-        }
-
-        if (activeFilter === 'range') {
-          const from = filterFromInput.value;
-          const to = filterToInput.value;
-          totalLabelEl.textContent = 'Total Spent (Filtered Range)';
-          return expenses.filter(exp => {
-            if (!exp.date) return false;
-            if (from && exp.date < from) return false;
-            if (to && exp.date > to) return false;
-            return true;
-          });
-        }
-
-        totalLabelEl.textContent = 'Total Spent (All Time)';
-        return expenses;
-      }
-
-      function renderExpenses() {
-        const filtered = getFilteredExpenses();
-        const total = filtered.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-        totalEl.textContent = total.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
-
-        if (filtered.length === 0) {
-          listEl.innerHTML = `<p style="color:var(--subtext); text-align:center; margin:8px 0;">No expenses found for this period.</p>`;
-          return;
-        }
-
-        listEl.innerHTML = [...filtered]
-          .sort((a, b) => new Date(b.date) - new Date(a.date))
-          .map(exp => `
-            <div class="list-item">
-              <div>
-                <div class="tx-title">${escapeHtml(exp.title)}</div>
-                <div class="tx-meta">${escapeHtml(exp.category)} • ${escapeHtml(exp.account || accounts[0])} • ${exp.date}</div>
-              </div>
-              <div class="tx-right">
-                <strong>$${Number(exp.amount).toFixed(2)}</strong>
-                <div class="item-actions">
-                  <button type="button" class="edit-btn" data-action="edit-exp" data-id="${exp.id}">Edit</button>
-                  <button type="button" class="del-btn" data-action="del-exp" data-id="${exp.id}">Delete</button>
-                </div>
-              </div>
-            </div>
-          `).join('');
-      }
-
-      // Event Delegation for Expense Edit/Delete
-      listEl.addEventListener('click', (e) => {
-        const btn = e.target.closest('button[data-action]');
-        if (!btn) return;
-        const { action, id } = btn.dataset;
-
-        if (action === 'edit-exp') {
-          const exp = expenses.find(item => item.id === id);
-          if (!exp) return;
-
-          editingId = id;
-          document.getElementById('title').value = exp.title;
-          document.getElementById('amount').value = exp.amount;
-          document.getElementById('date').value = exp.date;
-
-          if (!categories.includes(exp.category)) {
-            categorySelect.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(exp.category)}">${escapeHtml(exp.category)}</option>`);
-          }
-          if (exp.account && !accounts.includes(exp.account)) {
-            accountSelect.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(exp.account)}">${escapeHtml(exp.account)}</option>`);
-          }
-
-          categorySelect.value = exp.category;
-          accountSelect.value = exp.account || accounts[0];
-
-          formTitleEl.textContent = 'Edit Expense';
-          submitBtn.textContent = 'Update Expense';
-          cancelEditBtn.style.display = 'inline-block';
-
-          document.getElementById('formCard').scrollIntoView({ behavior: 'smooth' });
-        } else if (action === 'del-exp') {
-          const exp = expenses.find(item => item.id === id);
-          if (!exp) return;
-          if (!confirm(`Delete expense "${exp.title}"?`)) return;
-          if (editingId === id) resetFormState();
-          expenses = expenses.filter(item => item.id !== id);
-          saveExpenses();
-        }
-      });
-
-      function saveExpenses() {
-        localStorage.setItem(EXPENSE_KEY, JSON.stringify(expenses));
-        renderExpenses();
-      }
-
-      function resetFormState() {
-        editingId = null;
-        form.reset();
-        document.getElementById('date').value = toLocalDateStr(new Date());
-        formTitleEl.textContent = 'Add Expense';
-        submitBtn.textContent = 'Add Expense';
-        cancelEditBtn.style.display = 'none';
-      }
-
-      cancelEditBtn.addEventListener('click', resetFormState);
-
-      form.addEventListener('submit', (e) => {
-        e.preventDefault();
-
-        const expenseData = {
-          title: document.getElementById('title').value.trim(),
-          amount: parseFloat(document.getElementById('amount').value),
-          category: categorySelect.value,
-          account: accountSelect.value,
-          date: document.getElementById('date').value
-        };
-
-        if (editingId) {
-          expenses = expenses.map(exp => exp.id === editingId ? { ...exp, ...expenseData } : exp);
-        } else {
-          expenses.push({
-            id: Date.now().toString(),
-            ...expenseData
-          });
-        }
-
-        saveExpenses();
-        resetFormState();
-      });
-
-      // Only register Service Worker on http/https
-      if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-        navigator.serviceWorker.register('./sw.js').catch(() => {});
-      }
-
-      // Initial Render
-      renderDropdowns();
-      renderSettings();
-      renderExpenses();
-    });
-  </script>
+  <script src="./app.js" defer></script>
 </body>
 </html>

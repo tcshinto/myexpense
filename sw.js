@@ -1,5 +1,5 @@
-const CACHE_NAME = 'expense-pwa-v9';
-const ASSETS = ['./', './index.html', './manifest.json'];
+const CACHE_NAME = 'expense-pwa-v14';
+const ASSETS = ['./', './index.html', './app.js', './manifest.json'];
 
 self.addEventListener('install', (e) => {
   self.skipWaiting();
