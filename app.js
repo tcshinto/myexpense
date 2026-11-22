@@ -206,6 +206,8 @@ window.deleteOption = (type, index) => {
     alert(`You must keep at least one ${type}.`);
     return;
   }
+  const value = list[index];
+  if (!confirm(`Delete ${type} "${value}"?`)) return;
   list.splice(index, 1);
   saveOptions();
 };

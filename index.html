@@ -191,7 +191,7 @@
       <form id="expenseForm">
         <input type="text" id="title" placeholder="Title (e.g., Coffee)" required />
         <div class="form-row">
-          <input type="number" id="amount" placeholder="Amount" step="0.01" min="0.01" required />
+          <input type="number" inputmode="decimal" id="amount" placeholder="Amount" step="0.01" min="0.01" required />
           <input type="date" id="date" required />
         </div>
         <div class="form-row">
@@ -448,6 +448,8 @@
             alert(`You must keep at least one ${type}.`);
             return;
           }
+          const value = list[index];
+          if (!confirm(`Delete ${type} "${value}"?`)) return;
           list.splice(index, 1);
           saveOptions();
         }
@@ -560,6 +562,9 @@
 
           document.getElementById('formCard').scrollIntoView({ behavior: 'smooth' });
         } else if (action === 'del-exp') {
+          const exp = expenses.find(item => item.id === id);
+          if (!exp) return;
+          if (!confirm(`Delete expense "${exp.title}"?`)) return;
           if (editingId === id) resetFormState();
           expenses = expenses.filter(item => item.id !== id);
           saveExpenses();
